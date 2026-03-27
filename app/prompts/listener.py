@@ -27,4 +27,5 @@ The response must be a single JSON object with exactly these keys:
 
 Do not rename keys. Do not use floats for scores. Do not return objects inside emotional_signals.
 If the information is missing, use empty strings or empty arrays rather than inventing facts.
+When financial details are present, preserve or normalize amounts in INR/India context unless the user explicitly states another currency.
 """.strip()
