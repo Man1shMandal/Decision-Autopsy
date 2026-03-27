@@ -22,15 +22,17 @@ export default function Composer({ value, onChange, onSubmit, disabled, placehol
         onSubmit(text);
       }}
     >
-      <input
-        type="text"
+      <textarea
         value={text}
         onChange={(event) => setText(event.target.value)}
         placeholder={placeholder}
         maxLength={500}
         disabled={disabled}
+        rows={2}
       />
-      <button type="submit" disabled={disabled}>Send</button>
+      <button type="submit" disabled={disabled} aria-label="Send decision">
+        <span className="composer-send-icon" aria-hidden="true">↑</span>
+      </button>
     </form>
   );
 }
