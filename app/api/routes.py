@@ -1,0 +1,60 @@
+from fastapi import APIRouter, Depends, status
+
+from app.prompts.listener import LISTENER_PROMPT
+from app.prompts.questioner import QUESTIONER_PROMPT
+from app.schemas.agent import (
+    AgentRequest,
+    AgentResponse,
+    ListenerOutput,
+    QuestionerOutput,
+)
+from app.services.agents import AgentExecutor, get_agent_executor
+
+router = APIRouter()
+
+
+@router.get("/health", tags=["platform"])
+async def health() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+@router.get("/ready", tags=["platform"])
+async def ready() -> dict[str, str]:
+    return {"status": "ready"}
+
+
+@router.post(
+    "/api/v1/listener",
+    response_model=AgentResponse[ListenerOutput],
+    status_code=status.HTTP_200_OK,
+    tags=["agents"],
+)
+async def listener(
+    request: AgentRequest,
+    executor: AgentExecutor = Depends(get_agent_executor),
+) -> AgentResponse[ListenerOutput]:
+    return await executor.run_structured_agent(
+        agent_name="listener",
+        prompt=LISTENER_PROMPT,
+        request=request,
+        output_model=ListenerOutput,
+    )
+
+
+@router.post(
+    "/api/v1/questioner",
+    response_model=AgentResponse[QuestionerOutput],
+    status_code=status.HTTP_200_OK,
+    tags=["agents"],
+)
+async def questioner(
+    request: AgentRequest,
+    executor: AgentExecutor = Depends(get_agent_executor),
+) -> AgentResponse[QuestionerOutput]:
+    return await executor.run_structured_agent(
+        agent_name="questioner",
+        prompt=QUESTIONER_PROMPT,
+        request=request,
+        output_model=QuestionerOutput,
+    )
+
