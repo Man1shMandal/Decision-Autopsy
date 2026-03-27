@@ -1,16 +1,9 @@
 import { useMemo, useState } from "react";
-import { post } from "./services/apiClient.js";
+import { runListener, runQuestioner } from "./services/apiClient.js";
 import { createInitialContext } from "./state/context.js";
-import FuturesGrid from "./components/FuturesGrid.jsx";
 import MessageList from "./components/MessageList.jsx";
 import QuestionCard from "./components/QuestionCard.jsx";
 import Composer from "./components/Composer.jsx";
-
-const suggestionChips = [
-  "Which path has the least regret in 2 years?",
-  "What assumptions should I test this week?",
-  "What would make this decision reversible?",
-];
 
 function getConfidenceColor(value) {
   if (value >= 70) return "#2DD68A";
@@ -18,24 +11,51 @@ function getConfidenceColor(value) {
   return "#5A8DF0";
 }
 
+function buildBackendContext(ctx) {
+  const additionalAnswers = Object.fromEntries(
+    ctx.question_history
+      .filter((item) => typeof item.answer === "string" && item.answer.trim())
+      .map((item) => [item.question_id, item.answer])
+  );
+
+  return {
+    decision: {
+      title: ctx.decision || null,
+      description: ctx.situation_summary || ctx.decision || null,
+    },
+    answers: {
+      additional_answers: additionalAnswers,
+    },
+    listener_result: ctx.listener_result,
+    question_history: ctx.question_history,
+  };
+}
+
+function normalizeQuestionRecord(question, answer) {
+  return {
+    question_id: question.question_id,
+    question: question.question,
+    priority: question.priority,
+    rationale: question.rationale,
+    answer,
+  };
+}
+
 export default function App() {
   const [ctx, setCtx] = useState(createInitialContext());
   const [messages, setMessages] = useState([]);
   const [pendingQuestion, setPendingQuestion] = useState(null);
-  const [questionNumber, setQuestionNumber] = useState(1);
   const [state, setState] = useState("idle");
   const [isTyping, setIsTyping] = useState(false);
-  const [expandedTileId, setExpandedTileId] = useState(null);
   const [inputValue, setInputValue] = useState("");
-  const [showRerunBanner, setShowRerunBanner] = useState(false);
 
-  const inputDisabled = ["parsing", "questioning", "generating", "chatting"].includes(state);
-  const hasConversationStarted = messages.length > 0 || Boolean(pendingQuestion) || ctx.futures.length > 0 || isTyping;
+  const inputDisabled = ["parsing", "questioning"].includes(state);
+  const hasConversationStarted = messages.length > 0 || Boolean(pendingQuestion) || isTyping;
 
   const headerMeta = useMemo(() => {
-    if (!ctx.decision) return "Demo mode active with mocked JSON responses.";
-    return `Confidence ${ctx.confidence}% · Domain ${ctx.domain || "unknown"}`;
-  }, [ctx.confidence, ctx.decision, ctx.domain]);
+    if (!ctx.decision) return "Live backend mode active.";
+    return `Confidence ${ctx.confidence}% · Clarity ${ctx.clarity}%`;
+  }, [ctx.clarity, ctx.confidence, ctx.decision]);
 
   function addMessage(type, content, extra = {}) {
     setMessages((current) => [
@@ -53,12 +73,9 @@ export default function App() {
     setCtx(createInitialContext());
     setMessages([]);
     setPendingQuestion(null);
-    setQuestionNumber(1);
     setState("idle");
     setIsTyping(false);
-    setExpandedTileId(null);
     setInputValue("");
-    setShowRerunBanner(false);
   }
 
   async function safeRequest(action) {
@@ -68,168 +85,122 @@ export default function App() {
       console.error(error);
       setIsTyping(false);
       setState("error");
-      addMessage("error", "Something went wrong. Please try again.");
+      addMessage("error", "The live backend request failed. Check the backend server and try again.");
       return null;
     }
   }
 
-  async function runFutures(nextCtx) {
-    setState("generating");
-    setIsTyping(true);
-
-    const result = await safeRequest(() => post("/futures", nextCtx));
-    if (!result) return;
-
-    setIsTyping(false);
-
-    const updatedCtx = {
-      ...nextCtx,
-      bias_note: result.bias_note,
-      futures: result.futures,
-      fork_point: result.fork_point,
-    };
-
-    setCtx(updatedCtx);
-    addMessage("system", result.bias_note, { sub: result.pattern_sub });
-
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    addMessage("ai", "Running your autopsy now...");
-
-    setIsTyping(true);
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    setIsTyping(false);
-
-    setState("futures-shown");
-  }
-
-  async function askNextQuestion(nextCtx, nextQNum) {
+  async function fetchQuestions(nextCtx, prompt) {
     setState("questioning");
     setIsTyping(true);
 
-    const result = await safeRequest(() => post("/question", { ...nextCtx, question_number: nextQNum }));
-    if (!result) return;
+    const response = await safeRequest(() => runQuestioner(buildBackendContext(nextCtx), prompt));
+    if (!response) return;
 
     setIsTyping(false);
 
-    if (result.done) {
-      const doneCtx = {
-        ...nextCtx,
-        confidence: typeof result.confidence === "number" ? result.confidence : nextCtx.confidence,
-      };
-      setCtx(doneCtx);
-      await runFutures(doneCtx);
+    const questions = response.output.questions ?? [];
+    const nextQuestion = questions[0] ?? null;
+
+    setCtx((current) => ({
+      ...current,
+      active_questions: questions,
+    }));
+    setPendingQuestion(nextQuestion);
+
+    if (!nextQuestion) {
+      addMessage("ai", "Listener and Questioner completed. Downstream agents are not wired into the UI yet.");
+      setState("complete");
       return;
     }
 
-    setCtx((current) => ({ ...current, confidence: result.confidence }));
-    setPendingQuestion(result.question);
-    setQuestionNumber(nextQNum);
+    addMessage("ai", `Focus: ${response.output.recommended_focus}`);
+    setState("questioning");
   }
 
   async function startDecision(text) {
     setState("parsing");
     setIsTyping(true);
 
-    const baseCtx = { ...ctx, decision: text };
+    const baseCtx = {
+      ...createInitialContext(),
+      decision: text,
+    };
+
     setCtx(baseCtx);
     addMessage("user", text);
 
-    const parsed = await safeRequest(() => post("/parse", { decision: text }));
-    if (!parsed) return;
+    const listenerResponse = await safeRequest(() => runListener(buildBackendContext(baseCtx), text));
+    if (!listenerResponse) return;
 
     setIsTyping(false);
 
+    const listenerOutput = listenerResponse.output;
     const parsedCtx = {
       ...baseCtx,
-      ...parsed,
+      confidence: listenerOutput.confidence_score,
+      clarity: listenerOutput.clarity_score,
+      situation_summary: listenerOutput.situation_summary,
+      listener_result: listenerOutput,
     };
 
     setCtx(parsedCtx);
+    addMessage("ai", listenerOutput.situation_summary, {
+      muted: `Missing: ${listenerOutput.missing_information.join(", ") || "none"}`,
+    });
 
-    if (!parsedCtx.ask_questions) {
-      await runFutures(parsedCtx);
-      return;
-    }
-
-    await askNextQuestion(parsedCtx, 1);
+    await fetchQuestions(parsedCtx, "Ask the next best questions.");
   }
 
-  async function onQuestionAnswer(questionId, answer) {
-    if (!pendingQuestion) return;
-
-    const updatedCtx = {
+  async function onQuestionAnswer(question, answer) {
+    const nextCtx = {
       ...ctx,
-      answers: {
-        ...ctx.answers,
-        [questionId]: answer,
-      },
+      question_history: [
+        ...ctx.question_history,
+        normalizeQuestionRecord(question, answer),
+      ],
+      active_questions: ctx.active_questions.filter(
+        (item) => item.question_id !== question.question_id
+      ),
     };
-
-    setCtx(updatedCtx);
-    setPendingQuestion(null);
-
-    addMessage("ai", `Question ${questionId}`,
-      { muted: answer ? `Your answer: ${answer}` : "Skipped" }
-    );
-
-    const nextQ = questionNumber + 1;
-    setQuestionNumber(nextQ);
-    await askNextQuestion(updatedCtx, nextQ);
-  }
-
-  async function onQuestionSkip(questionId) {
-    if (!pendingQuestion) return;
-
-    const updatedCtx = {
-      ...ctx,
-      answers: {
-        ...ctx.answers,
-        [questionId]: null,
-      },
-      skipped: [...ctx.skipped, questionId],
-    };
-
-    setCtx(updatedCtx);
-    setPendingQuestion(null);
-
-    addMessage("ai", `Question ${questionId}`, { muted: "Skipped" });
-
-    const nextQ = questionNumber + 1;
-    setQuestionNumber(nextQ);
-    await askNextQuestion(updatedCtx, nextQ);
-  }
-
-  async function continueChat(message) {
-    setState("chatting");
-    setIsTyping(true);
-
-    const nextHistory = [...ctx.chat_history, { role: "user", content: message }];
-    const nextCtx = { ...ctx, chat_history: nextHistory };
 
     setCtx(nextCtx);
-    addMessage("user", message);
+    setPendingQuestion(null);
+    addMessage("user", answer);
 
-    const result = await safeRequest(() => post("/chat", { ...nextCtx, message }));
-    if (!result) return;
-
-    setIsTyping(false);
-
-    const finalCtx = {
-      ...nextCtx,
-      chat_history: [...nextHistory, { role: "assistant", content: result.reply }],
-    };
-
-    setCtx(finalCtx);
-    addMessage("ai", result.reply);
-
-    if (result.rerun) {
-      setState("rerun");
-      setShowRerunBanner(true);
+    const nextQuestion = nextCtx.active_questions[0] ?? null;
+    if (nextQuestion) {
+      setPendingQuestion(nextQuestion);
       return;
     }
 
-    setShowRerunBanner(false);
-    setState("futures-shown");
+    await fetchQuestions(nextCtx, "Given the current answers, ask the next best unanswered question.");
+  }
+
+  async function onQuestionSkip(question) {
+    const nextCtx = {
+      ...ctx,
+      skipped: [...ctx.skipped, question.question_id],
+      question_history: [
+        ...ctx.question_history,
+        normalizeQuestionRecord(question, null),
+      ],
+      active_questions: ctx.active_questions.filter(
+        (item) => item.question_id !== question.question_id
+      ),
+    };
+
+    setCtx(nextCtx);
+    setPendingQuestion(null);
+    addMessage("ai", `Skipped: ${question.question}`);
+
+    const nextQuestion = nextCtx.active_questions[0] ?? null;
+    if (nextQuestion) {
+      setPendingQuestion(nextQuestion);
+      return;
+    }
+
+    await fetchQuestions(nextCtx, "A question was skipped. Ask the next best unanswered question.");
   }
 
   async function onSubmitInput(text) {
@@ -243,12 +214,7 @@ export default function App() {
       return;
     }
 
-    await continueChat(value);
-  }
-
-  async function onRerun() {
-    setShowRerunBanner(false);
-    await runFutures(ctx);
+    addMessage("error", "Use the active question card below. Free-form follow-up chat is not connected yet.");
   }
 
   return (
@@ -280,37 +246,17 @@ export default function App() {
                   onSkip={onQuestionSkip}
                 />
               ) : null}
-
-              {ctx.futures.length > 0 ? (
-                <section className="futures-wrap">
-                  <FuturesGrid
-                    futures={ctx.futures}
-                    expandedTileId={expandedTileId}
-                    setExpandedTileId={setExpandedTileId}
-                    forkPoint={ctx.fork_point}
-                    chips={suggestionChips}
-                    onChipClick={(chip) => setInputValue(chip)}
-                  />
-                </section>
-              ) : null}
             </section>
           </main>
         ) : (
           <section className="starter-panel">
             <div className="starter-kicker">Start with one real decision</div>
             <h2>Type your situation below and press Send.</h2>
-            <p>Your AI autopsy chat appears after your first message.</p>
+            <p>The UI now uses the live Listener and Questioner backend.</p>
           </section>
         )}
 
         <section className="composer-wrap">
-          {showRerunBanner ? (
-            <div className="rerun-banner">
-              <span>That changes things. Regenerate futures?</span>
-              <button id="rerunBtn" type="button" onClick={onRerun}>Regenerate</button>
-            </div>
-          ) : null}
-
           <Composer
             value={inputValue}
             onChange={setInputValue}

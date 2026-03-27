@@ -29,6 +29,7 @@ Stateless FastAPI backend for the Decision Autopsy product.
 - `DECISION_AUTOPSY_TIMEOUT_SECONDS`
 - `DECISION_AUTOPSY_DEBUG_RAW_TEXT`
 - `DECISION_AUTOPSY_FRONTEND_ORIGINS`
+  Example: `http://localhost:5173,http://127.0.0.1:5173`
 
 Default provider values are aligned with the local `APITEST` project:
 - base URL: `https://api.abby.abb.com/api/v1/developers`

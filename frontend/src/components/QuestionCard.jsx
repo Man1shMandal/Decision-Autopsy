@@ -6,7 +6,7 @@ export default function QuestionCard({ question, confidence, confidenceColor, on
   function submitFreeAnswer() {
     const value = freeAnswer.trim();
     if (!value) return;
-    onAnswer(question.id, value);
+    onAnswer(question, value);
     setFreeAnswer("");
   }
 
@@ -15,21 +15,12 @@ export default function QuestionCard({ question, confidence, confidenceColor, on
       <div className="bubble-wrap">
         <div className="avatar">AI</div>
         <div className="bubble">
-          <p className="question-text">{question.text}</p>
-          <p className="question-context">{question.context}</p>
+          <p className="question-text">{question.question}</p>
+          <p className="question-context">{question.rationale}</p>
 
-          <div className="options">
-            {question.options.map((option) => (
-              <button
-                className="option-card"
-                type="button"
-                key={option.label}
-                onClick={() => onAnswer(question.id, option.label)}
-              >
-                <strong>{option.label}</strong>
-                <small>{option.sub}</small>
-              </button>
-            ))}
+          <div className="question-meta-row">
+            <span className="meta-pill">Priority {question.priority}</span>
+            <span className="meta-pill">{question.category}</span>
           </div>
 
           <div className="free-answer">
@@ -42,7 +33,7 @@ export default function QuestionCard({ question, confidence, confidenceColor, on
                 event.preventDefault();
                 submitFreeAnswer();
               }}
-              placeholder={question.own_placeholder}
+              placeholder="Type your answer..."
             />
             <button className="small-btn" type="button" onClick={submitFreeAnswer}>Use</button>
           </div>
@@ -58,7 +49,7 @@ export default function QuestionCard({ question, confidence, confidenceColor, on
               <span className="confidence-value">{confidence}%</span>
             </div>
 
-            <button className="skip-link" type="button" onClick={() => onSkip(question.id)}>
+            <button className="skip-link" type="button" onClick={() => onSkip(question)}>
               Skip this -&gt;
             </button>
           </div>

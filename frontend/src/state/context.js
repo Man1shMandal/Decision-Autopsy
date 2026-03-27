@@ -1,16 +1,13 @@
 export function createInitialContext() {
   return {
     decision: "",
-    domain: "",
-    options: [],
-    variables: [],
     confidence: 0,
-    ask_questions: true,
+    clarity: 0,
+    situation_summary: "",
     answers: {},
     skipped: [],
-    bias_note: "",
-    futures: [],
-    fork_point: null,
-    chat_history: [],
+    listener_result: null,
+    question_history: [],
+    active_questions: [],
   };
 }

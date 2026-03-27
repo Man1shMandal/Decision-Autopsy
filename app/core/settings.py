@@ -7,7 +7,12 @@ from functools import lru_cache
 
 def _split_origins(raw_value: str | None) -> list[str]:
     if not raw_value:
-        return ["http://localhost:3000", "http://localhost:5173"]
+        return [
+            "http://localhost:3000",
+            "http://localhost:5173",
+            "http://127.0.0.1:3000",
+            "http://127.0.0.1:5173",
+        ]
     return [origin.strip() for origin in raw_value.split(",") if origin.strip()]
 
 
