@@ -1,11 +1,25 @@
 import { useEffect, useRef } from "react";
 
-export default function MessageList({ messages, isTyping }) {
-  const bottomRef = useRef(null);
+export default function MessageList({ messages, isTyping, scrollContainerRef }) {
+  const shouldStickToBottomRef = useRef(true);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages, isTyping]);
+    const container = scrollContainerRef?.current;
+    if (!container) return;
+
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    shouldStickToBottomRef.current = distanceFromBottom < 80;
+  }, [messages.length, isTyping, scrollContainerRef]);
+
+  useEffect(() => {
+    const container = scrollContainerRef?.current;
+    if (!container || !shouldStickToBottomRef.current) return;
+
+    container.scrollTo({
+      top: container.scrollHeight,
+      behavior: "smooth",
+    });
+  }, [messages, isTyping, scrollContainerRef]);
 
   return (
     <>
@@ -14,7 +28,7 @@ export default function MessageList({ messages, isTyping }) {
           return (
             <article className="msg user" key={message.id}>
               <div className="bubble">
-                <div className="message-label">You</div>
+                {message.context ? <div className="question-context-ref">{message.context}</div> : null}
                 {message.content}
               </div>
             </article>
@@ -37,9 +51,8 @@ export default function MessageList({ messages, isTyping }) {
           return (
             <article className="msg error ai" key={message.id}>
               <div className="bubble-wrap">
-                <div className="avatar">AI</div>
+                <div className="avatar" aria-hidden="true" />
                 <div className="bubble">
-                  <div className="message-label">Error</div>
                   {message.content}
                 </div>
               </div>
@@ -50,9 +63,8 @@ export default function MessageList({ messages, isTyping }) {
         return (
           <article className="msg ai" key={message.id}>
             <div className="bubble-wrap">
-              <div className="avatar">AI</div>
+              <div className="avatar" aria-hidden="true" />
               <div className="bubble">
-                <div className="message-label">AI</div>
                 {message.content}
                 {message.muted ? <div className="muted">{message.muted}</div> : null}
               </div>
@@ -63,7 +75,7 @@ export default function MessageList({ messages, isTyping }) {
 
       {isTyping ? (
         <article className="msg ai typing-row">
-          <div className="avatar">AI</div>
+          <div className="avatar" aria-hidden="true" />
           <div className="bubble typing">
             <span></span>
             <span></span>
@@ -71,8 +83,6 @@ export default function MessageList({ messages, isTyping }) {
           </div>
         </article>
       ) : null}
-
-      <div ref={bottomRef} />
     </>
   );
 }

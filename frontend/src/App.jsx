@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   getApiUsage,
   getBackendHealth,
@@ -163,6 +163,39 @@ function formatUpdatedAt(value) {
   }
 }
 
+function formatFocusLabel(value) {
+  if (!value) return "intake";
+  return value.replaceAll("_", " ");
+}
+
+function toSentenceCase(value) {
+  if (!value) return "";
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function makePersonalSummary(output) {
+  const summary = (output?.situation_summary || "").trim();
+  const missing = Array.isArray(output?.missing_information) ? output.missing_information : [];
+
+  let direct = summary
+    .replace(/^User is\b/i, "You are")
+    .replace(/^User has\b/i, "You have")
+    .replace(/^User appears to be\b/i, "You seem to be")
+    .replace(/^User seems to be\b/i, "You seem to be")
+    .replace(/\bthe user\b/gi, "you");
+
+  if (!direct) {
+    direct = "You have started the thread, but I still need more context before I can help properly.";
+  }
+
+  const topMissing = missing.slice(0, 3).map((item) => toSentenceCase(String(item)));
+  if (topMissing.length === 0) {
+    return direct;
+  }
+
+  return `${direct} What I still need most is ${topMissing.join(", ")}.`;
+}
+
 function runWithTransition(update) {
   if (typeof document === "undefined" || typeof document.startViewTransition !== "function") {
     update();
@@ -185,6 +218,7 @@ export default function App() {
   const [usageSnapshot, setUsageSnapshot] = useState(null);
   const [usageError, setUsageError] = useState("");
   const [usageLoading, setUsageLoading] = useState(false);
+  const threadBoardRef = useRef(null);
 
   const ctx = currentSession?.ctx ?? createInitialContext();
   const messages = currentSession?.messages ?? [];
@@ -195,6 +229,20 @@ export default function App() {
   const answeredCount = ctx.question_history.filter((item) => item.answer).length;
   const skippedCount = ctx.skipped.length;
   const missingItems = ctx.listener_result?.missing_information ?? [];
+  const startedDecision = Boolean(ctx.decision);
+  const activeQuestionCount = ctx.active_questions.length;
+  const totalProgressCount = answeredCount + skippedCount + (pendingQuestion ? 1 : 0);
+  const totalQuestionFlow = answeredCount + skippedCount + activeQuestionCount + (pendingQuestion ? 1 : 0);
+  const questionProgressPercent = totalQuestionFlow > 0
+    ? Math.max(8, Math.round(((answeredCount + skippedCount) / totalQuestionFlow) * 100))
+    : 0;
+  const stageLabel = !startedDecision
+    ? "intake"
+    : pendingQuestion
+      ? "questioning"
+      : state === "complete"
+        ? "listener + questioner complete"
+        : state;
   const activeSessions = useMemo(
     () => [...sessions].sort((left, right) => new Date(right.updatedAt) - new Date(left.updatedAt)),
     [sessions]
@@ -344,14 +392,7 @@ export default function App() {
         active_questions: questions,
       },
       messages: nextQuestion
-        ? [
-            ...current.messages,
-            {
-              id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-              type: "ai",
-              content: `Focus: ${response.output.recommended_focus}`,
-            },
-          ]
+        ? current.messages
         : [
             ...current.messages,
             {
@@ -392,7 +433,7 @@ export default function App() {
       ...baseCtx,
       confidence: listenerOutput.confidence_score,
       clarity: listenerOutput.clarity_score,
-      situation_summary: listenerOutput.situation_summary,
+      situation_summary: makePersonalSummary(listenerOutput),
       listener_result: listenerOutput,
     };
 
@@ -406,8 +447,10 @@ export default function App() {
         {
           id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           type: "ai",
-          content: listenerOutput.situation_summary,
-          muted: `Missing: ${listenerOutput.missing_information.join(", ") || "none"}`,
+          content: makePersonalSummary(listenerOutput),
+          muted: listenerOutput.emotional_signals?.length
+            ? `I can already sense ${listenerOutput.emotional_signals.join(", ")} here.`
+            : null,
         },
       ],
     }));
@@ -437,6 +480,7 @@ export default function App() {
           id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           type: "user",
           content: answer,
+          context: question.question,
         },
       ],
     }));
@@ -470,14 +514,7 @@ export default function App() {
       ...current,
       ctx: nextCtx,
       pendingQuestion: null,
-      messages: [
-        ...current.messages,
-        {
-          id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          type: "ai",
-          content: `Skipped: ${question.question}`,
-        },
-      ],
+      messages: current.messages,
     }));
 
     const nextQuestion = nextCtx.active_questions[0] ?? null;
@@ -709,52 +746,38 @@ export default function App() {
         ) : (
           <main className="chat-layout screen-panel">
             <section className="chat-shell app-frame">
-              <div className="chat-header">
-                <div>
-                  <div className="panel-kicker">Decision thread</div>
-                  <h2 className="chat-title">{ctx.decision || "New Autopsy"}</h2>
-                  {ctx.situation_summary ? (
-                    <p className="chat-subtitle">{ctx.situation_summary}</p>
-                  ) : (
-                    <p className="chat-subtitle">Start by describing the decision once. The system will take it from there.</p>
-                  )}
-                </div>
-                <div className="chat-stats">
-                  <span>Confidence {ctx.confidence}%</span>
-                  <span>Clarity {ctx.clarity}%</span>
-                  <span>{answeredCount} answered</span>
-                </div>
-              </div>
-
-              <section className="messages thread-board" aria-live="polite">
-                <MessageList messages={messages} isTyping={isTyping} />
+              <section className="messages thread-board" aria-live="polite" ref={threadBoardRef}>
+                <MessageList
+                  messages={messages}
+                  isTyping={isTyping}
+                  scrollContainerRef={threadBoardRef}
+                />
 
                 {pendingQuestion ? (
                   <QuestionCard
                     question={pendingQuestion}
-                    confidence={ctx.confidence}
-                    confidenceColor={getConfidenceColor(ctx.confidence)}
+                    progressPercent={questionProgressPercent}
+                    progressLabel={`${answeredCount + skippedCount} done`}
+                    questionLabel={`Question ${answeredCount + skippedCount + 1}`}
                     onAnswer={onQuestionAnswer}
                     onSkip={onQuestionSkip}
                   />
                 ) : null}
               </section>
 
-              <section className="composer-wrap">
-                <Composer
-                  value={inputValue}
-                  onChange={setInputValue}
-                  onSubmit={onSubmitInput}
-                  disabled={inputDisabled}
-                  placeholder="Describe a decision you're facing..."
-                />
-
-                <div className="footer-strip">
-                  <span>{missingItems.length} gaps remaining</span>
-                  <span>{skippedCount} skipped</span>
-                  <span>{state === "complete" ? "Listener and Questioner complete" : "Live backend connected"}</span>
-                </div>
-              </section>
+              {!startedDecision ? (
+                <section className="composer-wrap">
+                  <Composer
+                    value={inputValue}
+                    onChange={setInputValue}
+                    onSubmit={onSubmitInput}
+                    disabled={inputDisabled}
+                    placeholder="Describe a decision you're facing..."
+                  />
+                </section>
+              ) : (
+                <div className="chat-bottom-spacer" />
+              )}
             </section>
           </main>
         )}
