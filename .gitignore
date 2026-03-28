@@ -1,7 +1,52 @@
-.venv/
+# Python bytecode and caches
 __pycache__/
+*.py[cod]
+*$py.class
+
+# Python environments
+.venv/
+venv/
+env/
+ENV/
+
+# Python tooling and test artifacts
 .pytest_cache/
-*.pyc
-*.pyo
-*.pyd
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.hypothesis/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+
+# Packaging artifacts
+build/
+dist/
 *.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# Frontend artifacts
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/coverage/
+
+# Logs and runtime files
+*.log
+*.pid
+
+# Environment files and secrets
+.env
+.env.*
+!.env.example
+
+# Editor and OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
